@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     DB_POOL_TIMEOUT:    int  = 30
 
     # Redis
-    REDIS_URL:          str  = "redis://localhost:6379/0"
+    REDIS_URL:          str  = ""
     CACHE_TTL_PRED:     int  = 300
     CACHE_TTL_PLAYERS:  int  = 3600
     CACHE_TTL_FEATURES: int  = 900
