@@ -2,8 +2,8 @@
 Props router — GET /v1/props and GET /v1/props/upcoming
 """
 import logging
-from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, Query, HTTPException
+from datetime import datetime
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
@@ -80,14 +80,14 @@ async def get_props(
         return cached
 
     result = await db.execute(
-        select(PropLine).where(
-            PropLine.player_id == player_id,
-            PropLine.game_date >= datetime.utcnow().date() - timedelta(days=1),
-        ).order_by(PropLine.game_date.desc())
+        select(PropLine)
+        .where(PropLine.player_id == player_id)
+        .order_by(PropLine.game_date.desc())
+        .limit(50)
     )
     rows = result.scalars().all()
     if not rows:
-        raise HTTPException(status_code=404, detail="No props found for today")
+        return []
 
     # Group by stat_type to attach all_books
     from collections import defaultdict
