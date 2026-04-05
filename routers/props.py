@@ -131,6 +131,7 @@ async def get_props(
 
 @games_router.get("/today")
 async def get_todays_games(db: AsyncSession = Depends(get_db)):
+    # Primary: props with real game_time_utc (live data)
     result = await db.execute(
         select(PropLine)
         .where(PropLine.game_time_utc != None)
@@ -138,6 +139,41 @@ async def get_todays_games(db: AsyncSession = Depends(get_db)):
         .order_by(PropLine.game_time_utc.asc())
     )
     props = result.scalars().all()
+
+    # Fallback: no live data — group latest props by player
+    if not props:
+        result = await db.execute(
+            select(PropLine)
+            .where(PropLine.is_best_line == True)
+            .order_by(PropLine.game_date.desc())
+            .limit(100)
+        )
+        props = result.scalars().all()
+        # Group as a single "today" game bucket per player
+        player_cache: dict[int, Player] = {}
+        seen_players: set[int] = set()
+        fallback_players = []
+        for prop in props:
+            if prop.player_id in seen_players:
+                continue
+            seen_players.add(prop.player_id)
+            if prop.player_id not in player_cache:
+                pr = await db.execute(select(Player).where(Player.id == prop.player_id))
+                player_cache[prop.player_id] = pr.scalar_one_or_none()
+            player = player_cache[prop.player_id]
+            if player:
+                fallback_players.append({
+                    "id": player.id, "name": player.name,
+                    "team": player.team, "position": player.position,
+                })
+        if not fallback_players:
+            return []
+        return [{
+            "game_id":       "today",
+            "game_time_utc": None,
+            "players":       fallback_players,
+            "prop_count":    len(props),
+        }]
 
     games: dict[str, dict] = {}
     player_cache: dict[int, Player] = {}

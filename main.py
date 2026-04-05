@@ -13,7 +13,7 @@ from core.config import get_settings
 from core.database import engine, Base, SessionFactory
 from core.logging_cfg import setup_logging
 from ml.registry import load_all as load_models
-from routers import predictions, players, props, analytics, auth
+from routers import predictions, players, props, analytics, auth, admin
 from routers.props import games_router
 from seed import seed_if_empty
 from services.scheduler import start as scheduler_start, stop as scheduler_stop
@@ -134,6 +134,7 @@ app.include_router(auth.router)
 app.include_router(players.router)
 app.include_router(props.router)
 app.include_router(games_router)
+app.include_router(admin.router)
 app.include_router(predictions.router)
 app.include_router(analytics.router)
 
