@@ -97,8 +97,17 @@ async def get_props(
 
     data = []
     for _, group in groups.items():
-        # Pick best line (is_best_line=True or first)
-        best = next((p for p in group if p.is_best_line), group[0])
+        # Real (bookmaker-tagged) lines take priority for display
+        real = [p for p in group if p.bookmaker]
+        display_group = real if real else group
+        # Deduplicate by bookmaker — keep highest line per book
+        seen_books: dict[str, PropLine] = {}
+        for p in display_group:
+            bk = p.bookmaker or ""
+            if bk not in seen_books or p.line > seen_books[bk].line:
+                seen_books[bk] = p
+        unique = sorted(seen_books.values(), key=lambda x: x.line, reverse=True)
+        best = unique[0]  # highest line after dedup
         out = PropOut.model_validate(best)
         out.all_books = [
             BookLine(
@@ -108,7 +117,7 @@ async def get_props(
                 under_odds=p.under_odds,
                 is_best=(p.id == best.id),
             )
-            for p in sorted(group, key=lambda x: x.line, reverse=True)
+            for p in unique
         ]
         data.append(out.model_dump())
 
