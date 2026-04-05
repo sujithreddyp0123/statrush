@@ -24,6 +24,23 @@ log = logging.getLogger("statrush.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Run column migrations before create_all (safe on both SQLite and Postgres)
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        migrations = [
+            "ALTER TABLE prop_lines ADD COLUMN IF NOT EXISTS bookmaker VARCHAR(60)",
+            "ALTER TABLE prop_lines ADD COLUMN IF NOT EXISTS is_best_line BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE prop_lines ADD COLUMN IF NOT EXISTS game_id VARCHAR(120)",
+            "ALTER TABLE prop_lines ADD COLUMN IF NOT EXISTS game_time_utc VARCHAR(40)",
+            "ALTER TABLE prop_lines ADD COLUMN IF NOT EXISTS over_odds INTEGER",
+            "ALTER TABLE prop_lines ADD COLUMN IF NOT EXISTS under_odds INTEGER",
+        ]
+        for sql in migrations:
+            try:
+                await conn.execute(text(sql))
+            except Exception:
+                pass
+
     # Create tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
