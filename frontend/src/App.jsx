@@ -58,6 +58,57 @@ const fetchPrediction = (playerId, statType, line) =>
     }),
   });
 
+// ─── Countdown timer ─────────────────────────────────────────────────
+function GameCountdown({ gameTimeUtc }) {
+  const [timeLeft, setTimeLeft] = useState("");
+  const [status, setStatus] = useState("upcoming");
+
+  useEffect(() => {
+    if (!gameTimeUtc) return;
+    const calc = () => {
+      const now      = new Date();
+      const gameTime = new Date(gameTimeUtc);
+      const diff     = gameTime - now;
+      if (diff <= 0 && diff > -7200000) { setStatus("live");     setTimeLeft("LIVE");  return; }
+      if (diff <= -7200000)             { setStatus("final");    setTimeLeft("FINAL"); return; }
+      const totalSecs = Math.floor(diff / 1000);
+      const hours = Math.floor(totalSecs / 3600);
+      const mins  = Math.floor((totalSecs % 3600) / 60);
+      const secs  = totalSecs % 60;
+      if (hours > 0) {
+        setTimeLeft(`${hours}h ${String(mins).padStart(2,"0")}m`);
+        setStatus("upcoming");
+      } else if (mins <= 30) {
+        setTimeLeft(`${String(hours).padStart(2,"0")}:${String(mins).padStart(2,"0")}:${String(secs).padStart(2,"0")}`);
+        setStatus("soon");
+      } else {
+        setTimeLeft(`${mins}m`);
+        setStatus("upcoming");
+      }
+    };
+    calc();
+    const iv = setInterval(calc, 1000);
+    return () => clearInterval(iv);
+  }, [gameTimeUtc]);
+
+  const styles = {
+    live:     { bg: "rgba(0,201,122,0.15)",    color: "#00C97A", border: "rgba(0,201,122,0.3)" },
+    soon:     { bg: "rgba(255,107,0,0.15)",    color: "#FF6B00", border: "rgba(255,107,0,0.3)" },
+    upcoming: { bg: "rgba(255,255,255,0.05)",  color: "rgba(255,255,255,0.45)", border: "rgba(255,255,255,0.08)" },
+    final:    { bg: "rgba(255,255,255,0.03)",  color: "rgba(255,255,255,0.2)",  border: "rgba(255,255,255,0.05)" },
+  };
+  const s = styles[status];
+  return (
+    <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: s.bg, color: s.color,
+      border: `1px solid ${s.border}`, fontFamily: "'DM Mono',monospace", fontWeight: 700,
+      letterSpacing: "0.04em", display: "inline-flex", alignItems: "center", gap: 4,
+      animation: status === "live" ? "blink 1.5s infinite" : "none" }}>
+      {status === "live" && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#00C97A", display: "inline-block" }} />}
+      {timeLeft}
+    </span>
+  );
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────
 const SRLogo = ({ size = 36 }) => (
   <svg width={size} height={size} viewBox="0 0 100 100">
@@ -277,7 +328,9 @@ export default function StatRush() {
           {playersError && <ErrorBanner message={playersError} onRetry={() => { setPlayersLoading(true); fetchPlayers().then(d => { setPlayers(d); if (d.length) setSel(d[0]); setPlayersLoading(false); }).catch(e => { setPlayersError(e.message); setPlayersLoading(false); }); }} />}
 
           {(players || []).map(p => {
-            const firstProp = (preds[`${p.id}_points`] || preds[`${p.id}_${Object.keys(preds).find(k => k.startsWith(`${p.id}_`))?.split("_")[1]}`])?.data;
+            const firstPredKey = Object.keys(preds).find(k => k.startsWith(`${p.id}_`));
+            const firstPred    = firstPredKey ? preds[firstPredKey]?.data : null;
+            const firstProp    = (props && sel?.id === p.id) ? props[0] : null;
             const initials = (p.name || "??").split(" ").map(w => w[0]).join("").slice(0, 2);
             return (
               <div key={p.id} className={`pchip ${sel?.id === p.id ? "on" : ""}`} onClick={() => handleSelectPlayer(p)}>
@@ -286,11 +339,12 @@ export default function StatRush() {
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: sel?.id === p.id ? "#fff" : "rgba(255,255,255,0.65)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
-                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>{p.team} · {p.position}</div>
+                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginBottom: firstProp?.game_time_utc ? 3 : 0 }}>{p.team} · {p.position}</div>
+                  {firstProp?.game_time_utc && <GameCountdown gameTimeUtc={firstProp.game_time_utc} />}
                 </div>
-                {firstProp && (
-                  <span style={{ fontSize: 10, fontFamily: "'DM Mono',monospace", fontWeight: 700, color: firstProp.edge_pct >= 5 ? GREEN : firstProp.edge_pct >= 0 ? ORANGE_B : "#666", flexShrink: 0 }}>
-                    {firstProp.edge_pct > 0 ? "+" : ""}{firstProp.edge_pct?.toFixed(1)}%
+                {firstPred && (
+                  <span style={{ fontSize: 10, fontFamily: "'DM Mono',monospace", fontWeight: 700, color: firstPred.edge_pct >= 5 ? GREEN : firstPred.edge_pct >= 0 ? ORANGE_B : "#666", flexShrink: 0 }}>
+                    {firstPred.edge_pct > 0 ? "+" : ""}{firstPred.edge_pct?.toFixed(1)}%
                   </span>
                 )}
               </div>
@@ -338,10 +392,29 @@ export default function StatRush() {
                     <span key={t} style={{ fontSize: 10, padding: "2px 8px", borderRadius: 5, background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.45)", border: "1px solid rgba(255,255,255,0.07)" }}>{t}</span>
                   ))}
                 </div>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
-                  {propsLoading ? "Loading props..." : `${props.length} props available tonight`}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
+                    {propsLoading ? "Loading props..." : `${props.length} props available tonight`}
+                  </span>
+                  {props[0]?.game_time_utc && <GameCountdown gameTimeUtc={props[0].game_time_utc} />}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Live games banner */}
+          {props.some(p => {
+            if (!p.game_time_utc) return false;
+            const diff = new Date(p.game_time_utc) - new Date();
+            return diff <= 0 && diff > -7200000;
+          }) && (
+            <div style={{ marginBottom: 14, padding: "8px 16px", background: "rgba(0,201,122,0.08)",
+              border: "1px solid rgba(0,201,122,0.2)", borderRadius: 10,
+              display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#00C97A",
+                animation: "blink 1.5s infinite" }} />
+              <span style={{ fontSize: 12, color: "#00C97A",
+                fontFamily: "'DM Mono',monospace", fontWeight: 700 }}>GAMES IN PROGRESS</span>
             </div>
           )}
 
@@ -416,6 +489,13 @@ export default function StatRush() {
                         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
                           <span style={{ fontWeight: 700, fontSize: 15, color: "#fff" }}>{statLabel(prop.stat_type)}</span>
                           <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 14, color: "rgba(255,255,255,0.55)" }}>{prop.line}</span>
+                          {prop.bookmaker && (
+                            <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4,
+                              background: "rgba(255,107,0,0.1)", color: "#FF8C00",
+                              fontFamily: "'DM Mono',monospace", border: "1px solid rgba(255,107,0,0.18)" }}>
+                              {prop.bookmaker.toUpperCase()}
+                            </span>
+                          )}
                           <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 6, fontFamily: "'DM Mono',monospace",
                             ...(pred.prediction?.toLowerCase() === "over"
                               ? { background: "rgba(255,107,0,0.14)", color: ORANGE_B, border: "1px solid rgba(255,107,0,0.28)" }
@@ -462,6 +542,26 @@ export default function StatRush() {
                               ))}
                             </div>
                           </>
+                        )}
+
+                        {/* Bookmaker comparison table */}
+                        {prop.all_books && prop.all_books.length > 1 && (
+                          <div style={{ marginBottom: 16 }}>
+                            <div style={{ fontSize: 9, fontFamily: "'DM Mono',monospace", color: "rgba(255,107,0,0.55)", letterSpacing: "0.12em", marginBottom: 8 }}>ODDS COMPARISON</div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                              {prop.all_books.map((b, k) => (
+                                <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 7, background: b.is_best ? "rgba(255,107,0,0.07)" : "rgba(255,255,255,0.025)", border: b.is_best ? "1px solid rgba(255,107,0,0.2)" : "1px solid rgba(255,255,255,0.05)" }}>
+                                  <span style={{ flex: 1, fontSize: 11, color: b.is_best ? "rgba(255,255,255,0.8)" : "rgba(255,255,255,0.4)", fontFamily: "'DM Mono',monospace" }}>
+                                    {(b.bookmaker || "—").toUpperCase()}
+                                  </span>
+                                  <span style={{ fontSize: 13, fontWeight: 700, fontFamily: "'DM Mono',monospace", color: b.is_best ? ORANGE_B : "rgba(255,255,255,0.5)" }}>{b.line}</span>
+                                  {b.over_odds && <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "'DM Mono',monospace" }}>o{b.over_odds > 0 ? "+" : ""}{b.over_odds}</span>}
+                                  {b.under_odds && <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "'DM Mono',monospace" }}>u{b.under_odds > 0 ? "+" : ""}{b.under_odds}</span>}
+                                  {b.is_best && <span style={{ fontSize: 8, padding: "1px 5px", borderRadius: 3, background: "rgba(255,107,0,0.15)", color: ORANGE, fontFamily: "'DM Mono',monospace", border: "1px solid rgba(255,107,0,0.25)" }}>BEST</span>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
                         )}
 
                         {/* Numbers grid — all from backend */}
