@@ -56,15 +56,19 @@ class GameLog(Base):
 
 class PropLine(Base):
     __tablename__ = "prop_lines"
-    id:           Mapped[int]             = mapped_column(Integer, primary_key=True)
-    player_id:    Mapped[int]             = mapped_column(ForeignKey("players.id"))
-    game_date:    Mapped[date]            = mapped_column(Date)
-    stat_type:    Mapped[StatType]        = mapped_column(Enum(StatType))
-    line:         Mapped[float]           = mapped_column(Float)
-    over_odds:    Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    under_odds:   Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    actual_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    player:       Mapped["Player"] = relationship(back_populates="prop_lines")
+    id:             Mapped[int]             = mapped_column(Integer, primary_key=True)
+    player_id:      Mapped[int]             = mapped_column(ForeignKey("players.id"))
+    game_date:      Mapped[date]            = mapped_column(Date)
+    stat_type:      Mapped[StatType]        = mapped_column(Enum(StatType))
+    line:           Mapped[float]           = mapped_column(Float)
+    over_odds:      Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    under_odds:     Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    actual_value:   Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    bookmaker:      Mapped[Optional[str]]   = mapped_column(String(60), nullable=True)
+    is_best_line:   Mapped[Optional[bool]]  = mapped_column(Boolean, nullable=True, default=False)
+    game_id:        Mapped[Optional[str]]   = mapped_column(String(120), nullable=True)
+    game_time_utc:  Mapped[Optional[str]]   = mapped_column(String(40), nullable=True)
+    player:         Mapped["Player"] = relationship(back_populates="prop_lines")
 
 
 class Prediction(Base):

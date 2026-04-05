@@ -378,6 +378,134 @@ async def seed_live_data(db: AsyncSession) -> list[dict]:
     return report
 
 
+async def fetch_and_store_todays_props(db: AsyncSession) -> int:
+    """Fetch today + tomorrow NBA prop lines from The Odds API and store them."""
+    from datetime import datetime, timezone, timedelta
+    import asyncio as _asyncio
+
+    if not cfg.ODDS_API_KEY:
+        log.warning("[props] No ODDS_API_KEY set — skipping live props")
+        return 0
+
+    now      = datetime.now(timezone.utc)
+    tomorrow = now + timedelta(days=1)
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        events_resp = await client.get(
+            "https://api.the-odds-api.com/v4/sports/basketball_nba/events",
+            params={"apiKey": cfg.ODDS_API_KEY, "regions": "us"},
+        )
+        if events_resp.status_code != 200:
+            log.warning(f"[props] Odds API events failed: {events_resp.status_code}")
+            return 0
+
+        events = events_resp.json()
+        valid_events = []
+        for event in events:
+            ct = event.get("commence_time", "")
+            try:
+                event_time = datetime.fromisoformat(ct.replace("Z", "+00:00"))
+                if event_time.date() <= tomorrow.date():
+                    valid_events.append(event)
+            except Exception:
+                continue
+
+        log.info(f"[props] Found {len(valid_events)} NBA events in next 2 days")
+        inserted = 0
+
+        for event in valid_events:
+            event_id      = event["id"]
+            game_time_utc = event.get("commence_time", "")
+
+            await _asyncio.sleep(0.5)
+
+            try:
+                odds_resp = await client.get(
+                    f"https://api.the-odds-api.com/v4/sports/basketball_nba/events/{event_id}/odds",
+                    params={
+                        "apiKey":      cfg.ODDS_API_KEY,
+                        "regions":     "us",
+                        "markets":     "player_points,player_assists,player_rebounds",
+                        "oddsFormat":  "american",
+                        "bookmakers":  "draftkings,fanduel,betmgm,caesars,pointsbet",
+                    },
+                )
+                if odds_resp.status_code != 200:
+                    continue
+                odds_data = odds_resp.json()
+            except Exception as e:
+                log.warning(f"[props] Failed to fetch odds for event {event_id}: {e}")
+                continue
+
+            # Collect all Over lines per (player, stat) across bookmakers
+            player_lines: dict[str, dict] = {}
+            for bookmaker in odds_data.get("bookmakers", []):
+                book_name = bookmaker.get("key", "unknown")
+                for market in bookmaker.get("markets", []):
+                    mkt_key = market.get("key", "")
+                    stat = {"player_points": "points",
+                            "player_assists": "assists",
+                            "player_rebounds": "rebounds"}.get(mkt_key)
+                    if not stat:
+                        continue
+                    for outcome in market.get("outcomes", []):
+                        if outcome.get("name") != "Over":
+                            continue
+                        pname = outcome.get("description", "")
+                        point = outcome.get("point")
+                        price = outcome.get("price", -110)
+                        if not pname or point is None:
+                            continue
+                        key = f"{pname}_{stat}"
+                        if key not in player_lines:
+                            player_lines[key] = {"player_name": pname, "stat": stat, "books": []}
+                        player_lines[key]["books"].append({
+                            "bookmaker": book_name,
+                            "line":      float(point),
+                            "over_odds": int(price),
+                        })
+
+            for key, data in player_lines.items():
+                pname = data["player_name"]
+                stat  = data["stat"]
+                books = data["books"]
+
+                result = await db.execute(
+                    select(Player).where(
+                        Player.name.ilike(f"%{pname.split()[-1]}%")
+                    )
+                )
+                player = result.scalar_one_or_none()
+                if not player:
+                    continue
+
+                best_book = max(books, key=lambda x: x["line"])
+
+                for book in books:
+                    stat_enum = {"points": StatType.points,
+                                 "assists": StatType.assists,
+                                 "rebounds": StatType.rebounds}.get(stat)
+                    if stat_enum is None:
+                        continue
+                    db.add(PropLine(
+                        player_id     = player.id,
+                        game_date     = now.date(),
+                        stat_type     = stat_enum,
+                        line          = book["line"],
+                        over_odds     = book["over_odds"],
+                        bookmaker     = book["bookmaker"],
+                        is_best_line  = (book["bookmaker"] == best_book["bookmaker"]),
+                        game_id       = event_id,
+                        game_time_utc = game_time_utc,
+                    ))
+                    inserted += 1
+
+            await db.commit()
+
+    log.info(f"[props] Inserted {inserted} prop lines for today+tomorrow")
+    return inserted
+
+
 async def ingest_player(external_id: str, db: AsyncSession):
     """Upsert player + game logs into DB."""
     player_data = next((p for p in MOCK_PLAYERS if p["external_id"] == external_id), None)
