@@ -15,6 +15,7 @@ from core.logging_cfg import setup_logging
 from ml.registry import load_all as load_models
 from routers import predictions, players, props, analytics, auth
 from seed import seed_if_empty
+from services.scheduler import start as scheduler_start, stop as scheduler_stop
 
 cfg = get_settings()
 setup_logging()
@@ -47,6 +48,16 @@ async def lifespan(app: FastAPI):
     else:
         load_models()
 
+    # Fetch tonight + tomorrow prop lines
+    log.info("Fetching tonight and tomorrow prop lines...")
+    try:
+        from services.ingestion import fetch_and_store_todays_props
+        async with SessionFactory() as props_db:
+            count = await fetch_and_store_todays_props(props_db)
+            log.info(f"Fetched {count} live prop lines")
+    except Exception as e:
+        log.warning(f"Live props fetch failed: {e}")
+
     live_keys = []
     if cfg.BALLDONTLIE_API_KEY:
         live_keys.append("BallDontLie")
@@ -55,7 +66,9 @@ async def lifespan(app: FastAPI):
     if live_keys:
         log.info(f"Live API keys detected: {', '.join(live_keys)}")
     log.info(f"StatRush API ready [env={cfg.ENV} model={cfg.MODEL_VERSION}]")
+    scheduler_start()
     yield
+    scheduler_stop()
     await engine.dispose()
 
 
