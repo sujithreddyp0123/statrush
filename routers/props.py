@@ -1,5 +1,6 @@
 """
-Props router — GET /v1/props and GET /v1/props/upcoming
+Props router — GET /v1/props, GET /v1/props/upcoming
+Games router — GET /v1/games/today
 """
 import logging
 from datetime import datetime
@@ -10,12 +11,13 @@ from pydantic import BaseModel
 
 from core.database import get_db
 from core.redis_client import cache_get, cache_set
-from models.orm import PropLine, StatType
+from models.orm import PropLine, StatType, Player
 from core.config import get_settings
 
 cfg = get_settings()
 log = logging.getLogger("statrush.router.props")
 router = APIRouter(prefix="/v1/props", tags=["props"])
+games_router = APIRouter(prefix="/v1/games", tags=["games"])
 
 
 class BookLine(BaseModel):
@@ -123,3 +125,55 @@ async def get_props(
 
     await cache_set(cache_key, data, ttl=600)
     return data
+
+
+# ── Games endpoint ────────────────────────────────────────────────────
+
+@games_router.get("/today")
+async def get_todays_games(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(PropLine)
+        .where(PropLine.game_time_utc != None)
+        .where(PropLine.is_best_line == True)
+        .order_by(PropLine.game_time_utc.asc())
+    )
+    props = result.scalars().all()
+
+    games: dict[str, dict] = {}
+    player_cache: dict[int, Player] = {}
+
+    for prop in props:
+        gid = prop.game_id or prop.game_time_utc
+        if gid not in games:
+            games[gid] = {
+                "game_id":       gid,
+                "game_time_utc": prop.game_time_utc,
+                "players":       {},
+                "prop_count":    0,
+            }
+        games[gid]["prop_count"] += 1
+
+        pid = prop.player_id
+        if pid not in games[gid]["players"]:
+            if pid not in player_cache:
+                pr = await db.execute(select(Player).where(Player.id == pid))
+                player_cache[pid] = pr.scalar_one_or_none()
+            player = player_cache[pid]
+            if player:
+                games[gid]["players"][pid] = {
+                    "id":       player.id,
+                    "name":     player.name,
+                    "team":     player.team,
+                    "position": player.position,
+                }
+
+    return [
+        {
+            "game_id":       g["game_id"],
+            "game_time_utc": g["game_time_utc"],
+            "players":       list(g["players"].values()),
+            "prop_count":    g["prop_count"],
+        }
+        for g in games.values()
+        if g["players"]
+    ]

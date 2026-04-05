@@ -170,18 +170,21 @@ const ErrorBanner = ({ message, onRetry }) => (
 
 // ─── Main App ─────────────────────────────────────────────────────────
 export default function StatRush() {
-  // ── Data from backend (FIX 3) ─────────────────────────────────
-  const [players,     setPlayers]     = useState([]);
-  const [playersLoading, setPlayersLoading] = useState(true);
-  const [playersError,   setPlayersError]   = useState(null);
+  // ── Games sidebar state ───────────────────────────────────────
+  const [games,        setGames]        = useState([]);
+  const [gamesLoading, setGamesLoading] = useState(true);
+  const [expandedGame, setExpandedGame] = useState(null);
+
+  // ── Player data (fallback + search) ──────────────────────────
+  const [players, setPlayers] = useState([]);
 
   const [sel,    setSel]    = useState(null);
   const [props,  setProps]  = useState([]);
   const [propsLoading, setPropsLoading] = useState(false);
   const [propsError,   setPropsError]   = useState(null);
 
-  // ── Predictions (FIX 10) ──────────────────────────────────────
-  const [preds,  setPreds]  = useState({});   // { "playerId_stat": { loading, data, error } }
+  // ── Predictions ───────────────────────────────────────────────
+  const [preds, setPreds] = useState({});
 
   // ── UI state ──────────────────────────────────────────────────
   const [query,    setQuery]    = useState("");
@@ -189,21 +192,26 @@ export default function StatRush() {
   const [tab,      setTab]      = useState("props");
   const [exp,      setExp]      = useState(null);
 
-  // ── Load players on mount (FIX 3) ────────────────────────────
+  // ── Load games on mount ───────────────────────────────────────
   useEffect(() => {
-    fetchPlayers()
+    apiFetch("/v1/games/today")
       .then(data => {
-        setPlayers(data);
-        if (data.length > 0) setSel(data[0]);
-        setPlayersLoading(false);
+        setGames(data || []);
+        setGamesLoading(false);
+        if (data && data.length > 0) {
+          setExpandedGame(data[0].game_id);
+          if (data[0].players.length > 0) setSel(data[0].players[0]);
+        }
       })
-      .catch(e => {
-        setPlayersError(e.message);
-        setPlayersLoading(false);
+      .catch(() => {
+        setGamesLoading(false);
+        fetchPlayers().then(p => { setPlayers(p); if (p.length) setSel(p[0]); });
       });
+    // Always load players for search fallback
+    fetchPlayers().then(setPlayers).catch(() => {});
   }, []);
 
-  // ── Load props when player changes (FIX 3) ───────────────────
+  // ── Load props when player changes ───────────────────────────
   useEffect(() => {
     if (!sel) return;
     setProps([]);
@@ -215,7 +223,7 @@ export default function StatRush() {
       .catch(e => { setPropsError(e.message); setPropsLoading(false); });
   }, [sel?.id]);
 
-  // ── Fetch predictions when props load (FIX 10) ───────────────
+  // ── Fetch predictions when props load ────────────────────────
   useEffect(() => {
     if (!sel || props.length === 0) return;
     props.forEach(prop => {
@@ -223,8 +231,8 @@ export default function StatRush() {
       if (preds[key]) return;
       setPreds(prev => ({ ...prev, [key]: { loading: true, data: null, error: null } }));
       fetchPrediction(sel.id, prop.stat_type, prop.line)
-        .then(data  => setPreds(prev => ({ ...prev, [key]: { loading: false, data, error: null } })))
-        .catch(e    => setPreds(prev => ({ ...prev, [key]: { loading: false, data: null, error: e.message } })));
+        .then(data => setPreds(prev => ({ ...prev, [key]: { loading: false, data, error: null } })))
+        .catch(e   => setPreds(prev => ({ ...prev, [key]: { loading: false, data: null, error: e.message } })));
     });
   }, [sel?.id, props]);
 
@@ -310,48 +318,113 @@ export default function StatRush() {
 
       <div style={{ display: "flex", height: "calc(100vh - 65px)", position: "relative", zIndex: 1 }}>
 
-        {/* SIDEBAR */}
-        <aside style={{ width: 226, borderRight: "1px solid rgba(255,107,0,0.09)", padding: "18px 12px", display: "flex", flexDirection: "column", gap: 3, overflowY: "auto", flexShrink: 0, background: "rgba(0,0,0,0.18)" }}>
-          <div style={{ fontSize: 9, fontFamily: "'DM Mono',monospace", color: "rgba(255,107,0,0.45)", letterSpacing: "0.14em", padding: "0 8px", marginBottom: 8 }}>NBA · TONIGHT</div>
+        {/* SIDEBAR — Games */}
+        <aside style={{ width: 232, borderRight: "1px solid rgba(255,107,0,0.09)", padding: 0, display: "flex", flexDirection: "column", overflowY: "auto", flexShrink: 0, background: "rgba(0,0,0,0.18)" }}>
+
+          <div style={{ fontSize: 9, fontFamily: "'DM Mono',monospace", color: "rgba(255,107,0,0.45)", letterSpacing: "0.14em", padding: "18px 16px 8px" }}>
+            NBA · UPCOMING GAMES
+          </div>
 
           {/* Loading skeletons */}
-          {playersLoading && [0,1,2,3,4].map(i => (
-            <div key={i} style={{ display: "flex", gap: 10, padding: "9px 12px", alignItems: "center" }}>
-              <div className="skel" style={{ width: 35, height: 35, borderRadius: 10, flexShrink: 0 }} />
-              <div style={{ flex: 1 }}>
-                <div className="skel" style={{ height: 12, width: "70%", marginBottom: 5 }} />
-                <div className="skel" style={{ height: 9, width: "40%" }} />
-              </div>
+          {gamesLoading && [0,1,2].map(i => (
+            <div key={i} style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+              <div className="skel" style={{ height: 12, width: "60%", marginBottom: 6 }} />
+              <div className="skel" style={{ height: 9, width: "40%" }} />
             </div>
           ))}
 
-          {playersError && <ErrorBanner message={playersError} onRetry={() => { setPlayersLoading(true); fetchPlayers().then(d => { setPlayers(d); if (d.length) setSel(d[0]); setPlayersLoading(false); }).catch(e => { setPlayersError(e.message); setPlayersLoading(false); }); }} />}
+          {/* Game rows */}
+          {games.map(game => (
+            <div key={game.game_id}>
 
-          {(players || []).map(p => {
-            const firstPredKey = Object.keys(preds).find(k => k.startsWith(`${p.id}_`));
-            const firstPred    = firstPredKey ? preds[firstPredKey]?.data : null;
-            const firstProp    = (props && sel?.id === p.id) ? props[0] : null;
-            const initials = (p.name || "??").split(" ").map(w => w[0]).join("").slice(0, 2);
-            return (
-              <div key={p.id} className={`pchip ${sel?.id === p.id ? "on" : ""}`} onClick={() => handleSelectPlayer(p)}>
-                <div style={{ width: 35, height: 35, borderRadius: 10, background: sel?.id === p.id ? "rgba(255,107,0,0.16)" : "rgba(255,255,255,0.05)", border: sel?.id === p.id ? "1px solid rgba(255,107,0,0.28)" : "1px solid transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, fontFamily: "'DM Mono',monospace", color: sel?.id === p.id ? ORANGE : "rgba(255,255,255,0.45)", flexShrink: 0 }}>
-                  {initials}
+              {/* Game header — clickable */}
+              <div
+                onClick={() => setExpandedGame(expandedGame === game.game_id ? null : game.game_id)}
+                style={{
+                  padding: "12px 16px",
+                  borderBottom: "1px solid rgba(255,255,255,0.04)",
+                  cursor: "pointer",
+                  background: expandedGame === game.game_id ? "rgba(255,107,0,0.08)" : "transparent",
+                  transition: "background 0.15s",
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "#fff", marginBottom: 4 }}>
+                    {game.players.map(p => p.team).filter((t, i, a) => t && a.indexOf(t) === i).join(" vs ") || "NBA Game"}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <GameCountdown gameTimeUtc={game.game_time_utc} />
+                    <span style={{ fontSize: 9, color: "rgba(255,255,255,0.3)", fontFamily: "'DM Mono',monospace" }}>
+                      {game.prop_count} props
+                    </span>
+                  </div>
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: sel?.id === p.id ? "#fff" : "rgba(255,255,255,0.65)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
-                  <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginBottom: firstProp?.game_time_utc ? 3 : 0 }}>{p.team} · {p.position}</div>
-                  {firstProp?.game_time_utc && <GameCountdown gameTimeUtc={firstProp.game_time_utc} />}
-                </div>
-                {firstPred && (
-                  <span style={{ fontSize: 10, fontFamily: "'DM Mono',monospace", fontWeight: 700, color: firstPred.edge_pct >= 5 ? GREEN : firstPred.edge_pct >= 0 ? ORANGE_B : "#666", flexShrink: 0 }}>
-                    {firstPred.edge_pct > 0 ? "+" : ""}{firstPred.edge_pct?.toFixed(1)}%
-                  </span>
-                )}
+                <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 10, display: "inline-block",
+                  transition: "transform 0.2s",
+                  transform: expandedGame === game.game_id ? "rotate(180deg)" : "none" }}>▾</span>
               </div>
-            );
-          })}
 
-          <div style={{ marginTop: "auto", padding: "14px 8px 0", borderTop: "1px solid rgba(255,107,0,0.08)" }}>
+              {/* Players in game */}
+              {expandedGame === game.game_id && (
+                <div style={{ background: "rgba(0,0,0,0.2)" }}>
+                  {game.players.map(player => {
+                    const key  = Object.keys(preds).find(k => k.startsWith(`${player.id}_points`));
+                    const pred = preds[key]?.data;
+                    const initials = (player.name || "??").split(" ").map(w => w[0]).join("").slice(0, 2);
+                    return (
+                      <div
+                        key={player.id}
+                        className={`pchip ${sel?.id === player.id ? "on" : ""}`}
+                        style={{ margin: "2px 8px", borderRadius: 8 }}
+                        onClick={() => { setSel(player); setExp(null); }}
+                      >
+                        <div style={{
+                          width: 32, height: 32, borderRadius: 9,
+                          background: sel?.id === player.id ? "rgba(255,107,0,0.16)" : "rgba(255,255,255,0.05)",
+                          border: sel?.id === player.id ? "1px solid rgba(255,107,0,0.28)" : "1px solid transparent",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 10, fontWeight: 700, fontFamily: "'DM Mono',monospace",
+                          color: sel?.id === player.id ? ORANGE : "rgba(255,255,255,0.45)",
+                          flexShrink: 0,
+                        }}>
+                          {initials}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600,
+                            color: sel?.id === player.id ? "#fff" : "rgba(255,255,255,0.65)",
+                            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {player.name}
+                          </div>
+                          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>
+                            {player.team} · {player.position || "NBA"}
+                          </div>
+                        </div>
+                        {pred && (
+                          <span style={{
+                            fontSize: 10, fontFamily: "'DM Mono',monospace", fontWeight: 700,
+                            color: pred.edge_pct >= 8 ? GREEN : pred.edge_pct >= 3 ? ORANGE_B : "#666",
+                            flexShrink: 0,
+                          }}>
+                            {pred.edge_pct > 0 ? "+" : ""}{pred.edge_pct?.toFixed(1)}%
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* No games fallback */}
+          {!gamesLoading && games.length === 0 && (
+            <div style={{ padding: "16px", fontSize: 12, color: "rgba(255,255,255,0.3)", textAlign: "center" }}>
+              No games scheduled today
+            </div>
+          )}
+
+          <div style={{ marginTop: "auto", padding: "14px 16px", borderTop: "1px solid rgba(255,107,0,0.08)" }}>
             <div style={{ fontSize: 9, color: "rgba(255,255,255,0.18)", fontFamily: "'DM Mono',monospace", lineHeight: 1.9 }}>
               XGB + LGBM ensemble<br />Explanations via Claude API
             </div>
